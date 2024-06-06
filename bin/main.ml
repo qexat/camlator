@@ -77,9 +77,6 @@ class tokenizer (source : string) =
 
 let print_token (token : token) = Printf.printf "%s\n" (show_token token)
 let print_tokens (tokens : token list) = List.iter print_token tokens
-let source = "3 + 5"
-let tok = new tokenizer source
-let () = print_tokens tok#run
 
 type expr =
   | BinaryOpExpr of
@@ -178,3 +175,7 @@ let rec eval = function
   | LiteralExpr { token : token } -> int_of_string token.lexeme
   | InvalidExpr _ -> raise (Failure "invalid expression found")
 ;;
+
+let source = "3 + 5"
+let tok = new tokenizer source
+let () = print_tokens tok#run
