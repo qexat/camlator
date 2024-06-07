@@ -81,7 +81,7 @@ class tokenizer (source : string) =
   end
 
 let print_token (token : token) = Printf.printf "%s\n" (show_token token)
-let _print_tokens (tokens : token list) = List.iter print_token tokens
+let print_tokens (tokens : token list) = List.iter print_token tokens
 
 type expr =
   | BinaryOpExpr of
@@ -95,6 +95,7 @@ type expr =
       ; subexprs : expr list
       }
   | LiteralExpr of { token : token }
+[@@deriving show]
 
 type precedence =
   | SUM
@@ -151,7 +152,7 @@ module Parser = struct
     if distance >= List.length state.buffer
     then (
       state.buffer <- state.buffer @ [ List.nth parser.tokens state.current ];
-      lookahead parser (distance - 1))
+      lookahead parser distance)
     else List.nth state.buffer distance
   ;;
 
@@ -173,7 +174,7 @@ module Parser = struct
 
   let get_precedence parser =
     match Hashtbl.find_opt parselets.infix_parselets (lookahead parser 0).typ with
-    | Some _ -> 1
+    | Some parselet -> parselet.precedence
     | None -> 0
   ;;
 
@@ -191,10 +192,10 @@ module Parser = struct
   let parse_expression ?(precedence = 0) parser =
     match consume parser () with
     | Result.Ok token ->
-      (match Hashtbl.find_opt parselets.prefix_parselets token.typ with
-       | Some prefix ->
-         let left = prefix ~parser ~token in
-         parse_binary_expression parser prefix left precedence
+      (match Hashtbl.find_opt parselets.atom_parselets token.typ with
+       | Some atom ->
+         let left = atom ~parser ~token in
+         parse_binary_expression parser atom left precedence
        | None ->
          InvalidExpr
            { message = "could not parse \"" ^ token.lexeme ^ "\""; token; subexprs = [] })
@@ -257,6 +258,8 @@ let parser = Parser.create tokens
 let expr = Parser.run parser
 
 let () =
+  print_tokens tokens;
+  print_endline (show_expr expr);
   print_int (eval expr);
   print_newline ()
 ;;
