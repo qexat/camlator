@@ -93,74 +93,110 @@ type expr =
 
 (* TODO: make the parser work lol *)
 
-class parser_base (tokens : token list) =
-  object (self)
-    val mutable current = 0
-    val mutable buffer = []
-    val mutable prefix_parselets = Hashtbl.create 32
-    val mutable infix_parselets = Hashtbl.create 32
+type 'parser prefix_parselet = parser:'parser -> token:token -> expr
+type 'parser infix_parselet = parser:'parser -> left:expr -> token:token -> expr
 
-    method lookahead distance =
-      if distance >= List.length buffer
-      then (
-        buffer <- buffer @ [ List.nth tokens current ];
-        self#lookahead (distance - 1))
-      else List.nth buffer distance
+module ParserBase = struct
+  type t = { tokens : token list }
 
-    method consume ?expected () =
-      let token = self#lookahead 0 in
-      match expected with
-      | Some token_type ->
-        if token.typ != token_type
-        then Result.error "unexpected token type"
-        else self#consume ()
-      | None ->
-        let _ = self#lookahead 0 in
-        (match buffer with
-         | h :: t ->
-           buffer <- t;
-           Result.ok h
-         | [] -> failwith "empty buffer")
+  type parselets =
+    { prefix_parselets : (token_type, t prefix_parselet) Hashtbl.t
+    ; infix_parselets : (token_type, t infix_parselet) Hashtbl.t
+    }
 
-    method matches expected =
-      let token = self#lookahead 0 in
-      if token.typ != expected
-      then false
-      else (
-        let _ = self#consume () in
-        true)
+  type parser_state =
+    { mutable current : int
+    ; mutable buffer : token list
+    }
 
-    method register_prefix token_type parselet =
-      Hashtbl.add prefix_parselets token_type parselet
+  let state = { current = 0; buffer = [] }
 
-    method register_infix token_type parselet =
-      Hashtbl.add infix_parselets token_type parselet
+  let parselets =
+    { prefix_parselets = Hashtbl.create 32; infix_parselets = Hashtbl.create 32 }
+  ;;
 
-    method parse_expression ?(precedence = 0) () =
-      match self#consume () with
+  let create tokens = { tokens }
+
+  let register_prefix_parselet token_type parselet =
+    Hashtbl.add parselets.prefix_parselets token_type parselet
+  ;;
+
+  let register_infix_parselet token_type parselet =
+    Hashtbl.add parselets.infix_parselets token_type parselet
+  ;;
+
+  let rec lookahead parser distance =
+    if distance >= List.length state.buffer
+    then (
+      state.buffer <- state.buffer @ [ List.nth parser.tokens state.current ];
+      lookahead parser (distance - 1))
+    else List.nth state.buffer distance
+  ;;
+
+  let rec consume parser ?expected () =
+    let token = lookahead parser 0 in
+    match expected with
+    | Some token_type ->
+      if token.typ != token_type
+      then Result.error "unexpected token type"
+      else consume parser ()
+    | None ->
+      let _ = lookahead parser 0 in
+      (match state.buffer with
+       | h :: t ->
+         state.buffer <- t;
+         Result.ok h
+       | [] -> failwith "empty buffer")
+  ;;
+
+  let matches parser expected =
+    let token = lookahead parser 0 in
+    if token.typ != expected
+    then false
+    else (
+      let _ = consume parser () in
+      true)
+  ;;
+
+  let get_precedence parser =
+    match Hashtbl.find_opt parselets.infix_parselets (lookahead parser 0).typ with
+    | Some _ -> 1
+    | None -> 0
+  ;;
+
+  let rec parse_binary_expression parser prefix left token precedence =
+    if precedence < get_precedence parser
+    then (
+      match consume parser () with
       | Result.Ok token ->
-        (match Hashtbl.find_opt prefix_parselets token.typ with
-         | Some prefix ->
-           let left = prefix#parse self token in
-           ()
-         | None -> failwith ("could not parse \"" ^ token.lexeme ^ "\""))
-      | Result.Error message -> failwith message
-  end
+        let infix = Hashtbl.find parselets.infix_parselets token.typ in
+        parse_binary_expression parser prefix (infix parser left token) token precedence
+      | Result.Error message -> failwith message)
+    else left
+  ;;
 
-module type PrefixParselet = sig
-  val parse : parser:parser_base -> token:token -> expr
-end
-
-module type InfixParselet = sig
-  val parse : parser:parser_base -> left:expr -> token:token -> expr
-end
-
-module BinaryOpParselet : InfixParselet = struct
-  let parse parser left token =
-    let right = parser#parse_expression (precedence - Bool.to_int is_right_associative) in
-    BinaryOpExpr { operator = token.typ; left; right }
+  let parse_expression parser ?(precedence = 0) =
+    match consume parser () with
+    | Result.Ok token ->
+      (match Hashtbl.find_opt parselets.prefix_parselets token.typ with
+       | Some prefix ->
+         let left = prefix parser token in
+         parse_binary_expression parser prefix left token precedence
+       | None -> failwith ("could not parse \"" ^ token.lexeme ^ "\""))
+    | Result.Error message -> failwith message
   ;;
 end
+
+let binary_op_parselet precedence =
+  let is_right_associative = false in
+  fun parser left token ->
+    let right =
+      ParserBase.parse_expression
+        parser
+        ?precedence:(Some (precedence - Bool.to_int is_right_associative))
+    in
+    BinaryOpExpr { operator = token.typ; left; right }
+;;
 
 let binary_op_of_binary_op_token_type = function
   | MINUS -> fun a b -> a - b
