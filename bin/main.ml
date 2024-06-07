@@ -115,6 +115,13 @@ module ParserBase = struct
     { prefix_parselets = Hashtbl.create 32; infix_parselets = Hashtbl.create 32 }
   ;;
 
+  let reset_parser () =
+    state.current <- 0;
+    state.buffer <- [];
+    Hashtbl.clear parselets.prefix_parselets;
+    Hashtbl.clear parselets.infix_parselets
+  ;;
+
   let create tokens = { tokens }
 
   let register_prefix_parselet token_type parselet =
@@ -176,6 +183,7 @@ module ParserBase = struct
   ;;
 
   let parse_expression parser ?(precedence = 0) =
+    reset_parser ();
     match consume parser () with
     | Result.Ok token ->
       (match Hashtbl.find_opt parselets.prefix_parselets token.typ with
