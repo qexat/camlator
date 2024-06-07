@@ -171,25 +171,25 @@ module ParserBase = struct
     | None -> 0
   ;;
 
-  let rec parse_binary_expression parser prefix left token precedence =
+  let rec parse_binary_expression parser (prefix : t prefix_parselet) left precedence =
     if precedence < get_precedence parser
     then (
       match consume parser () with
       | Result.Ok token ->
         let infix = Hashtbl.find parselets.infix_parselets token.typ in
-        parse_binary_expression parser prefix (infix parser left token) token precedence
+        parse_binary_expression parser prefix (infix ~parser ~left ~token) precedence
       | Result.Error message -> failwith message)
     else left
   ;;
 
-  let parse_expression parser ?(precedence = 0) =
+  let parse_expression ?(precedence = 0) parser =
     reset_parser ();
     match consume parser () with
     | Result.Ok token ->
       (match Hashtbl.find_opt parselets.prefix_parselets token.typ with
        | Some prefix ->
-         let left = prefix parser token in
-         parse_binary_expression parser prefix left token precedence
+         let left = prefix ~parser ~token in
+         parse_binary_expression parser prefix left precedence
        | None -> failwith ("could not parse \"" ^ token.lexeme ^ "\""))
     | Result.Error message -> failwith message
   ;;
