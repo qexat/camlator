@@ -8,9 +8,14 @@ type binary_op_token_type =
 type token_type =
   | INTEGER
   | INVALID
-  | EOF
   | BINARY_OP of binary_op_token_type
+  | EOF
 [@@deriving show]
+
+let unwrap_binary_op = function
+  | BINARY_OP op -> op
+  | _ -> failwith "unwrap failed: expected binary op"
+;;
 
 type token =
   { typ : token_type
@@ -58,12 +63,12 @@ class tokenizer (source : string) =
       | '0' .. '9' -> self#make_integer ()
       | _ -> INVALID
 
-    method get_lexeme = String.sub source start (current - start)
+    method get_lexeme () = String.sub source start (current - start)
 
     method build_token typ =
-      { typ; lexeme = self#get_lexeme; startpos = start; endpos = current }
+      { typ; lexeme = self#get_lexeme (); startpos = start; endpos = current }
 
-    method run =
+    method run () =
       if self#is_at_end ()
       then (
         self#sync_head ();
@@ -72,11 +77,11 @@ class tokenizer (source : string) =
       else (
         self#sync_head ();
         tokens <- self#build_token (self#scan_token ()) :: tokens;
-        self#run)
+        self#run ())
   end
 
 let print_token (token : token) = Printf.printf "%s\n" (show_token token)
-let print_tokens (tokens : token list) = List.iter print_token tokens
+let _print_tokens (tokens : token list) = List.iter print_token tokens
 
 type expr =
   | BinaryOpExpr of
@@ -91,16 +96,23 @@ type expr =
       }
   | LiteralExpr of { token : token }
 
-(* TODO: make the parser work lol *)
+type precedence =
+  | SUM
+  | PRODUCT
+  | EXPONENT
+  | PREFIX
+[@@deriving enum]
 
+type 'parser atom_parselet = parser:'parser -> token:token -> expr
 type 'parser prefix_parselet = parser:'parser -> token:token -> expr
 type 'parser infix_parselet = parser:'parser -> left:expr -> token:token -> expr
 
-module ParserBase = struct
+module Parser = struct
   type t = { tokens : token list }
 
   type parselets =
-    { prefix_parselets : (token_type, t prefix_parselet) Hashtbl.t
+    { atom_parselets : (token_type, t atom_parselet) Hashtbl.t
+    ; prefix_parselets : (token_type, t prefix_parselet) Hashtbl.t
     ; infix_parselets : (token_type, t infix_parselet) Hashtbl.t
     }
 
@@ -112,7 +124,10 @@ module ParserBase = struct
   let state = { current = 0; buffer = [] }
 
   let parselets =
-    { prefix_parselets = Hashtbl.create 32; infix_parselets = Hashtbl.create 32 }
+    { atom_parselets = Hashtbl.create 32
+    ; prefix_parselets = Hashtbl.create 32
+    ; infix_parselets = Hashtbl.create 32
+    }
   ;;
 
   let reset_parser () =
@@ -124,8 +139,8 @@ module ParserBase = struct
 
   let create tokens = { tokens }
 
-  let register_prefix_parselet token_type parselet =
-    Hashtbl.add parselets.prefix_parselets token_type parselet
+  let register_atom_parselet token_type parselet =
+    Hashtbl.add parselets.atom_parselets token_type parselet
   ;;
 
   let register_infix_parselet token_type parselet =
@@ -156,15 +171,6 @@ module ParserBase = struct
        | [] -> failwith "empty buffer")
   ;;
 
-  let matches parser expected =
-    let token = lookahead parser 0 in
-    if token.typ != expected
-    then false
-    else (
-      let _ = consume parser () in
-      true)
-  ;;
-
   let get_precedence parser =
     match Hashtbl.find_opt parselets.infix_parselets (lookahead parser 0).typ with
     | Some _ -> 1
@@ -183,27 +189,34 @@ module ParserBase = struct
   ;;
 
   let parse_expression ?(precedence = 0) parser =
-    reset_parser ();
     match consume parser () with
     | Result.Ok token ->
       (match Hashtbl.find_opt parselets.prefix_parselets token.typ with
        | Some prefix ->
          let left = prefix ~parser ~token in
          parse_binary_expression parser prefix left precedence
-       | None -> failwith ("could not parse \"" ^ token.lexeme ^ "\""))
+       | None ->
+         InvalidExpr
+           { message = "could not parse \"" ^ token.lexeme ^ "\""; token; subexprs = [] })
     | Result.Error message -> failwith message
+  ;;
+
+  let run parser =
+    reset_parser ();
+    parse_expression parser
   ;;
 end
 
-let binary_op_parselet precedence =
-  let is_right_associative = false in
-  fun parser left token ->
-    let right =
-      ParserBase.parse_expression
-        parser
-        ?precedence:(Some (precedence - Bool.to_int is_right_associative))
-    in
-    BinaryOpExpr { operator = token.typ; left; right }
+let literal_parselet ~parser:_ ~token = LiteralExpr { token }
+
+let binary_op_parselet ~precedence ~is_right_associative ~parser ~left ~token =
+  let right =
+    Parser.parse_expression
+      parser
+      ?precedence:
+        (Some (precedence_to_enum precedence - Bool.to_int is_right_associative))
+  in
+  BinaryOpExpr { operator = unwrap_binary_op token.typ; left; right }
 ;;
 
 let binary_op_of_binary_op_token_type = function
@@ -217,9 +230,33 @@ let rec eval = function
   | BinaryOpExpr { operator; left; right } ->
     (binary_op_of_binary_op_token_type operator) (eval left) (eval right)
   | LiteralExpr { token : token } -> int_of_string token.lexeme
-  | InvalidExpr _ -> raise (Failure "invalid expression found")
+  | InvalidExpr _ -> failwith "invalid expression found"
 ;;
 
 let source = "3 + 5"
 let tok = new tokenizer source
-let () = print_tokens tok#run
+let tokens = tok#run ()
+
+let () =
+  Parser.register_atom_parselet INTEGER literal_parselet;
+  Parser.register_infix_parselet
+    (BINARY_OP PLUS)
+    (binary_op_parselet ~precedence:SUM ~is_right_associative:false);
+  Parser.register_infix_parselet
+    (BINARY_OP MINUS)
+    (binary_op_parselet ~precedence:SUM ~is_right_associative:false);
+  Parser.register_infix_parselet
+    (BINARY_OP STAR)
+    (binary_op_parselet ~precedence:PRODUCT ~is_right_associative:false);
+  Parser.register_infix_parselet
+    (BINARY_OP SLASH)
+    (binary_op_parselet ~precedence:PRODUCT ~is_right_associative:false)
+;;
+
+let parser = Parser.create tokens
+let expr = Parser.run parser
+
+let () =
+  print_int (eval expr);
+  print_newline ()
+;;

@@ -2,5 +2,5 @@
  (public_name camlator)
  (name main)
  (preprocess
-  (pps ppx_deriving.show ppx_deriving.ord))
+  (pps ppx_deriving.show ppx_deriving.ord ppx_deriving.enum))
  (libraries camlator))
