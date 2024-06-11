@@ -19,12 +19,12 @@ let () =
        ~precedence:Camlator.Precedence.SUM
        ~is_right_associative:false);
   Camlator.Parser.register_infix_parselet
-    (BINARY_OP STAR)
+    (Camlator.Token_type.BINARY_OP Camlator.Token_type.STAR)
     (Camlator.Parselet_impls.binary_op_parselet
        ~precedence:Camlator.Precedence.PRODUCT
        ~is_right_associative:false);
   Camlator.Parser.register_infix_parselet
-    (BINARY_OP SLASH)
+    (Camlator.Token_type.BINARY_OP Camlator.Token_type.SLASH)
     (Camlator.Parselet_impls.binary_op_parselet
        ~precedence:Camlator.Precedence.PRODUCT
        ~is_right_associative:false)
