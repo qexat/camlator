@@ -1,2 +1,13 @@
 (library
- (name camlator))
+ (name camlator)
+ (public_name camlator)
+ (modules
+  ast
+  eval
+  parselet
+  parselet_impls
+  parser
+  precedence
+  token_type
+  token
+  tokenizer))
