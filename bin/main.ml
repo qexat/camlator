@@ -9,12 +9,12 @@ let () =
     Camlator.Token_type.INTEGER
     Camlator.Parselet_impls.literal_parselet;
   Camlator.Parser.register_infix_parselet
-    (BINARY_OP PLUS)
+    (Camlator.Token_type.BINARY_OP Camlator.Token_type.PLUS)
     (Camlator.Parselet_impls.binary_op_parselet
        ~precedence:Camlator.Precedence.SUM
        ~is_right_associative:false);
   Camlator.Parser.register_infix_parselet
-    (BINARY_OP MINUS)
+    (Camlator.Token_type.BINARY_OP Camlator.Token_type.MINUS)
     (Camlator.Parselet_impls.binary_op_parselet
        ~precedence:Camlator.Precedence.SUM
        ~is_right_associative:false);
